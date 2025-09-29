@@ -60,7 +60,7 @@ local HarvestIgnores = {
 }
 
 --// Globals
-local SelectedSeed, AutoPlantRandom, AutoPlant, AutoHarvest, AutoBuy, SellThreshold, NoClip, AutoWalkAllowRandom, SelectedSeedStock, AutoSell
+local SelectedSeed, AutoPlantRandom, AutoPlant, AutoHarvest, AutoBuy, SellThreshold, NoClip, AutoWalkAllowRandom, SelectedSeedStock, AutoSell, BestPlantToSell
 
 local function CreateWindow()
 	local Window = ReGui:Window({
@@ -182,6 +182,65 @@ local function GetInvCrops(): table
 	CollectCropsFromParent(Character, Crops)
 
 	return Crops
+end
+
+local function GetCropInfo(Crop: Tool): table?
+	local ItemString = Crop:FindFirstChild("Item_String")
+	local Variant = Crop:FindFirstChild("Variant")
+	local Rarity = Crop:FindFirstChild("Rarity")
+	
+	if not ItemString then return end
+	
+	return {
+		Name = ItemString.Value,
+		Variant = Variant and Variant.Value or "Normal",
+		Rarity = Rarity and Rarity.Value or "Common",
+		Tool = Crop
+	}
+end
+
+local function GetCropValue(CropInfo: table): number
+	local Variant = CropInfo.Variant
+	local Rarity = CropInfo.Rarity
+	
+	--// Value based on variant (higher is better)
+	local VariantValue = 0
+	if Variant == "Normal" then VariantValue = 1
+	elseif Variant == "Gold" then VariantValue = 3
+	elseif Variant == "Rainbow" then VariantValue = 5
+	end
+	
+	--// Value based on rarity (higher is better)
+	local RarityValue = 0
+	if Rarity == "Common" then RarityValue = 1
+	elseif Rarity == "Uncommon" then RarityValue = 2
+	elseif Rarity == "Rare" then RarityValue = 3
+	elseif Rarity == "Epic" then RarityValue = 4
+	elseif Rarity == "Legendary" then RarityValue = 5
+	end
+	
+	return VariantValue + RarityValue
+end
+
+local function GetBestCropsToSell(): table
+	local Crops = GetInvCrops()
+	local CropInfos = {}
+	
+	--// Get crop information
+	for _, Crop in next, Crops do
+		local CropInfo = GetCropInfo(Crop)
+		if CropInfo then
+			CropInfo.Value = GetCropValue(CropInfo)
+			table.insert(CropInfos, CropInfo)
+		end
+	end
+	
+	--// Sort by value (highest first)
+	table.sort(CropInfos, function(a, b)
+		return a.Value > b.Value
+	end)
+	
+	return CropInfos
 end
 
 local function GetArea(Base: BasePart)
@@ -348,13 +407,66 @@ local function HarvestPlants(Parent: Model)
     end
 end
 
+local function SellBestCrops()
+	if not BestPlantToSell.Value then
+		SellInventory()
+		return
+	end
+	
+	local BestCrops = GetBestCropsToSell()
+	if #BestCrops == 0 then return end
+	
+	local Character = LocalPlayer.Character
+	local Previous = Character:GetPivot()
+	local PreviousSheckles = ShecklesCount.Value
+	
+	--// Prevent conflict
+	if IsSelling then return end
+	IsSelling = true
+	
+	Character:PivotTo(CFrame.new(62, 4, -26))
+	
+	--// Sell only the best crops (top 50% or minimum 5 crops)
+	local CropsToSell = math.max(5, math.floor(#BestCrops * 0.5))
+	
+	for i = 1, CropsToSell do
+		if i > #BestCrops then break end
+		
+		local CropInfo = BestCrops[i]
+		local CropTool = CropInfo.Tool
+		
+		--// Equip the crop tool
+		if CropTool.Parent == Backpack then
+			Character.Humanoid:EquipTool(CropTool)
+			wait(0.1)
+		end
+		
+		--// Try to sell the crop
+		local BeforeSheckles = ShecklesCount.Value
+		GameEvents.Sell_Inventory:FireServer()
+		
+		--// Wait for sale to complete
+		local WaitTime = 0
+		while ShecklesCount.Value == BeforeSheckles and WaitTime < 2 do
+			wait(0.1)
+			WaitTime += 0.1
+		end
+		
+		wait(0.2)
+	end
+	
+	Character:PivotTo(Previous)
+	wait(0.2)
+	IsSelling = false
+end
+
 local function AutoSellCheck()
     local CropCount = #GetInvCrops()
 
     if not AutoSell.Value then return end
     if CropCount < SellThreshold.Value then return end
 
-    SellInventory()
+    SellBestCrops()
 end
 
 local function AutoWalkLoop()
@@ -512,9 +624,17 @@ SellNode:Button({
 	Text = "Sell inventory",
 	Callback = SellInventory, 
 })
+SellNode:Button({
+	Text = "Sell best crops",
+	Callback = SellBestCrops, 
+})
 AutoSell = SellNode:Checkbox({
 	Value = false,
 	Label = "Enabled"
+})
+BestPlantToSell = SellNode:Checkbox({
+	Value = false,
+	Label = "Sell best crops only"
 })
 SellThreshold = SellNode:SliderInt({
     Label = "Crops threshold",
