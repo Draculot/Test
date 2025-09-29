@@ -131,38 +131,105 @@ end
 
 --// Pet spawning functions
 local function SpawnPet(PetName: string)
-    --// Try to find pet spawn remote event
-    local PetSpawnRE = GameEvents:FindFirstChild("SpawnPet_RE") or GameEvents:FindFirstChild("PetSpawn_RE")
+    print("Attempting to spawn pet:", PetName)
     
-    if PetSpawnRE then
-        PetSpawnRE:FireServer(PetName)
-        return true
-    end
+    --// Method 1: Try various pet spawn remote events
+    local PetSpawnREs = {
+        "SpawnPet_RE", "PetSpawn_RE", "SpawnPet", "PetSpawn", 
+        "SummonPet_RE", "SummonPet", "GetPet_RE", "GetPet",
+        "BuyPet_RE", "BuyPet", "UnlockPet_RE", "UnlockPet"
+    }
     
-    --// Alternative method - try to find pet shop or pet system
-    local PetShop = PlayerGui:FindFirstChild("Pet_Shop") or PlayerGui:FindFirstChild("PetShop")
-    if PetShop then
-        --// Try to interact with pet shop
-        local PetButton = PetShop:FindFirstChild(PetName, true)
-        if PetButton and PetButton:IsA("GuiButton") then
-            PetButton.Activated:Fire()
+    for _, EventName in next, PetSpawnREs do
+        local PetSpawnRE = GameEvents:FindFirstChild(EventName)
+        if PetSpawnRE then
+            print("Found remote event:", EventName)
+            PetSpawnRE:FireServer(PetName)
             return true
         end
     end
     
-    --// Try workspace pet spawners
-    local PetSpawners = workspace:FindFirstChild("PetSpawners") or workspace:FindFirstChild("Pet_Spawners")
-    if PetSpawners then
-        local Spawner = PetSpawners:FindFirstChild(PetName)
-        if Spawner then
-            local Prompt = Spawner:FindFirstChild("ProximityPrompt", true)
+    --// Method 2: Try to find pet shop or pet system in PlayerGui
+    local PetShopNames = {"Pet_Shop", "PetShop", "PetShopGui", "Pet_Gui", "PetGui"}
+    for _, ShopName in next, PetShopNames do
+        local PetShop = PlayerGui:FindFirstChild(ShopName)
+        if PetShop then
+            print("Found pet shop:", ShopName)
+            --// Try to find pet button
+            local PetButton = PetShop:FindFirstChild(PetName, true)
+            if PetButton and PetButton:IsA("GuiButton") then
+                print("Found pet button for:", PetName)
+                PetButton.Activated:Fire()
+                return true
+            end
+            
+            --// Try to find any button with pet name in text
+            local function FindPetButtonInGui(Gui)
+                for _, Child in next, Gui:GetDescendants() do
+                    if Child:IsA("GuiButton") or Child:IsA("TextButton") then
+                        local Text = Child:FindFirstChild("TextLabel") or Child:FindFirstChild("Text")
+                        if Text and Text.Text:lower():find(PetName:lower()) then
+                            print("Found pet button by text:", PetName)
+                            Child.Activated:Fire()
+                            return true
+                        end
+                    end
+                end
+                return false
+            end
+            
+            if FindPetButtonInGui(PetShop) then
+                return true
+            end
+        end
+    end
+    
+    --// Method 3: Try workspace pet spawners
+    local PetSpawnerNames = {"PetSpawners", "Pet_Spawners", "PetSpawn", "Pet_Spawn", "Pets"}
+    for _, SpawnerName in next, PetSpawnerNames do
+        local PetSpawners = workspace:FindFirstChild(SpawnerName)
+        if PetSpawners then
+            print("Found pet spawners:", SpawnerName)
+            local Spawner = PetSpawners:FindFirstChild(PetName)
+            if Spawner then
+                local Prompt = Spawner:FindFirstChild("ProximityPrompt", true)
+                if Prompt then
+                    print("Found proximity prompt for:", PetName)
+                    fireproximityprompt(Prompt)
+                    return true
+                end
+            end
+        end
+    end
+    
+    --// Method 4: Try to find pet eggs or pet items
+    local PetEggs = workspace:FindFirstChild("PetEggs") or workspace:FindFirstChild("Pet_Eggs")
+    if PetEggs then
+        print("Found pet eggs")
+        local Egg = PetEggs:FindFirstChild(PetName)
+        if Egg then
+            local Prompt = Egg:FindFirstChild("ProximityPrompt", true)
             if Prompt then
+                print("Found egg prompt for:", PetName)
                 fireproximityprompt(Prompt)
                 return true
             end
         end
     end
     
+    --// Method 5: Try to find pet gacha or pet machine
+    local PetGacha = workspace:FindFirstChild("PetGacha") or workspace:FindFirstChild("Pet_Gacha") or workspace:FindFirstChild("Gacha")
+    if PetGacha then
+        print("Found pet gacha")
+        local Prompt = PetGacha:FindFirstChild("ProximityPrompt", true)
+        if Prompt then
+            print("Found gacha prompt")
+            fireproximityprompt(Prompt)
+            return true
+        end
+    end
+    
+    print("No pet spawning method found for:", PetName)
     return false
 end
 
@@ -356,8 +423,45 @@ for TierName, TierData in next, PetTiers do
     end
 end
 
+--// Debug section - Add this to help identify game structure
+local function DebugGameStructure()
+    print("=== DEBUGGING GAME STRUCTURE ===")
+    
+    --// Check GameEvents
+    print("GameEvents found:")
+    for _, Child in next, GameEvents:GetChildren() do
+        print("  -", Child.Name, "(" .. Child.ClassName .. ")")
+    end
+    
+    --// Check PlayerGui for pet-related GUIs
+    print("PlayerGui children:")
+    for _, Child in next, PlayerGui:GetChildren() do
+        if Child.Name:lower():find("pet") then
+            print("  -", Child.Name, "(" .. Child.ClassName .. ")")
+        end
+    end
+    
+    --// Check workspace for pet-related objects
+    print("Workspace children (pet-related):")
+    for _, Child in next, workspace:GetChildren() do
+        if Child.Name:lower():find("pet") or Child.Name:lower():find("gacha") or Child.Name:lower():find("egg") then
+            print("  -", Child.Name, "(" .. Child.ClassName .. ")")
+        end
+    end
+    
+    print("=== END DEBUG ===")
+end
+
+--// Add debug button to UI
+local DebugNode = Window:TreeNode({Title="Debug 🔍"})
+DebugNode:Button({
+    Text = "Debug Game Structure",
+    Callback = DebugGameStructure,
+})
+
 --// Services
 StartServices()
 
 print("Pet Spawner loaded successfully!")
 print("Select a tier and pet, then use the spawn buttons or enable auto-spawn!")
+print("Use the Debug section to see what's available in the game!")
